@@ -1,0 +1,633 @@
+<!DOCTYPE html>
+<html lang="tr">
+
+<head>
+
+  <meta charset="UTF-8">
+
+  <meta
+    name="viewport"
+    content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+
+  <meta name="theme-color" content="#1f5f98">
+
+  <title>HOCA MOBİLYA Barkod Okuyucu</title>
+
+  <script
+    src="https://unpkg.com/html5-qrcode@2.3.8/html5-qrcode.min.js">
+  </script>
+
+  <style>
+
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      margin: 0;
+      padding: 20px;
+      min-height: 100vh;
+      background: #eef2f5;
+      font-family: Arial, Helvetica, sans-serif;
+      color: #222;
+    }
+
+    .container {
+      width: 100%;
+      max-width: 520px;
+      margin: 0 auto;
+    }
+
+    .card {
+      background: #ffffff;
+      border-radius: 18px;
+      padding: 20px;
+      box-shadow: 0 8px 28px rgba(0, 0, 0, 0.12);
+    }
+
+    .logo {
+      text-align: center;
+      margin-bottom: 18px;
+    }
+
+    .logo h1 {
+      margin: 0;
+      color: #1f5f98;
+      font-size: 27px;
+    }
+
+    .logo p {
+      margin: 7px 0 0;
+      color: #666;
+      font-size: 15px;
+    }
+
+    #reader {
+      width: 100%;
+      min-height: 260px;
+      overflow: hidden;
+      border-radius: 14px;
+      background: #111;
+      margin-bottom: 16px;
+    }
+
+    #status {
+      padding: 13px;
+      margin-bottom: 14px;
+      border-radius: 10px;
+      background: #edf5ff;
+      color: #174f7e;
+      text-align: center;
+      font-weight: bold;
+      line-height: 1.4;
+      white-space: pre-line;
+    }
+
+    button {
+      width: 100%;
+      min-height: 52px;
+      margin-top: 10px;
+      border: none;
+      border-radius: 10px;
+      font-size: 17px;
+      font-weight: bold;
+      cursor: pointer;
+    }
+
+    button:disabled {
+      opacity: 0.65;
+      cursor: not-allowed;
+    }
+
+    .start-button {
+      background: #1f5f98;
+      color: white;
+    }
+
+    .stop-button {
+      background: #c62828;
+      color: white;
+      display: none;
+    }
+
+    .back-button {
+      background: #555;
+      color: white;
+    }
+
+    .manual-area {
+      margin-top: 18px;
+      padding-top: 18px;
+      border-top: 1px solid #ddd;
+    }
+
+    label {
+      display: block;
+      margin-bottom: 7px;
+      font-weight: bold;
+    }
+
+    input {
+      width: 100%;
+      height: 50px;
+      padding: 10px 12px;
+      border: 2px solid #b6c4cf;
+      border-radius: 9px;
+      font-size: 18px;
+    }
+
+    input:focus {
+      outline: none;
+      border-color: #1f5f98;
+    }
+
+    .send-button {
+      background: #2e7d32;
+      color: white;
+    }
+
+    .small-info {
+      margin-top: 16px;
+      color: #666;
+      font-size: 13px;
+      text-align: center;
+      line-height: 1.5;
+    }
+
+  </style>
+
+</head>
+
+<body>
+
+<div class="container">
+
+  <div class="card">
+
+    <div class="logo">
+
+      <h1>HOCA MOBİLYA</h1>
+
+      <p>Canlı Barkod Okuyucu</p>
+
+    </div>
+
+    <div id="status">
+      Kamerayı başlatmak için aşağıdaki düğmeye basın.
+    </div>
+
+    <div id="reader"></div>
+
+    <button
+      id="startButton"
+      class="start-button"
+      type="button"
+      onclick="startScanner()">
+      📷 KAMERAYI BAŞLAT
+    </button>
+
+    <button
+      id="stopButton"
+      class="stop-button"
+      type="button"
+      onclick="stopScanner()">
+      KAMERAYI KAPAT
+    </button>
+
+    <div class="manual-area">
+
+      <label for="manualBarcode">
+        Barkodu elle gir
+      </label>
+
+      <input
+        id="manualBarcode"
+        type="text"
+        inputmode="numeric"
+        autocomplete="off"
+        placeholder="Barkod numarası">
+
+      <button
+        class="send-button"
+        type="button"
+        onclick="sendManualBarcode()">
+        BARKODU GÖNDER
+      </button>
+
+    </div>
+
+    <button
+      class="back-button"
+      type="button"
+      onclick="returnWithoutBarcode()">
+      ← STOK SİSTEMİNE DÖN
+    </button>
+
+    <div class="small-info">
+      Fotoğraf kaydedilmez. Kamera yalnızca barkodu canlı okumak için kullanılır.
+    </div>
+
+  </div>
+
+</div>
+
+<script>
+
+  /************************************************
+   APPS SCRIPT WEB UYGULAMASI
+  ************************************************/
+
+  const APPS_SCRIPT_URL =
+    "https://script.google.com/macros/s/AKfycbyqmiDyBX1BTIhVR1efSVA1-LjZ_27R2g4Fs626SoyAhWj0HLqyt01uPD4rrDm643dSMg/exec";
+
+  /************************************************
+   DEĞİŞKENLER
+  ************************************************/
+
+  let html5QrCode = null;
+  let scannerRunning = false;
+  let scanLocked = false;
+
+  /************************************************
+   SAYFA YÜKLENDİĞİNDE
+  ************************************************/
+
+  window.addEventListener("load", function () {
+
+    const input =
+      document.getElementById("manualBarcode");
+
+    input.addEventListener("keydown", function (event) {
+
+      if (event.key === "Enter") {
+
+        event.preventDefault();
+
+        sendManualBarcode();
+
+      }
+
+    });
+
+  });
+
+  /************************************************
+   KAMERAYI BAŞLAT
+  ************************************************/
+
+  async function startScanner() {
+
+    if (scannerRunning) {
+      return;
+    }
+
+    if (typeof Html5Qrcode === "undefined") {
+
+      alert(
+        "Barkod okuyucu yüklenemedi.\n\n" +
+        "İnternet bağlantısını kontrol edin."
+      );
+
+      return;
+
+    }
+
+    scanLocked = false;
+
+    setStatus("Kamera açılıyor...");
+
+    const startButton =
+      document.getElementById("startButton");
+
+    const stopButton =
+      document.getElementById("stopButton");
+
+    startButton.disabled = true;
+
+    html5QrCode =
+      new Html5Qrcode("reader");
+
+    const config = {
+
+      fps: 12,
+
+      qrbox: function (
+        viewfinderWidth,
+        viewfinderHeight
+      ) {
+
+        let width =
+          Math.floor(viewfinderWidth * 0.88);
+
+        let height =
+          Math.floor(viewfinderHeight * 0.30);
+
+        width = Math.min(width, 400);
+        height = Math.min(height, 150);
+
+        if (width < 180) {
+          width = 180;
+        }
+
+        if (height < 80) {
+          height = 80;
+        }
+
+        return {
+          width: width,
+          height: height
+        };
+
+      },
+
+      aspectRatio: 1.777778,
+
+      disableFlip: false,
+
+      formatsToSupport: [
+
+        Html5QrcodeSupportedFormats.EAN_13,
+        Html5QrcodeSupportedFormats.EAN_8,
+        Html5QrcodeSupportedFormats.CODE_128,
+        Html5QrcodeSupportedFormats.CODE_39,
+        Html5QrcodeSupportedFormats.CODE_93,
+        Html5QrcodeSupportedFormats.ITF,
+        Html5QrcodeSupportedFormats.UPC_A,
+        Html5QrcodeSupportedFormats.UPC_E
+
+      ]
+
+    };
+
+    try {
+
+      await html5QrCode.start(
+
+        {
+          facingMode: "environment"
+        },
+
+        config,
+
+        barcodeReadSuccess,
+
+        function () {
+          // Barkod bulunana kadar tarama devam eder.
+        }
+
+      );
+
+      scannerRunning = true;
+
+      startButton.style.display = "none";
+      startButton.disabled = false;
+
+      stopButton.style.display = "block";
+
+      setStatus(
+        "Kamera hazır.\nBarkodu tarama alanının içine yerleştirin."
+      );
+
+    } catch (error) {
+
+      console.error(
+        "Kamera başlatma hatası:",
+        error
+      );
+
+      startButton.disabled = false;
+
+      await resetScanner();
+
+      const errorName =
+        error && error.name
+          ? error.name
+          : "";
+
+      const errorMessage =
+        error && error.message
+          ? error.message
+          : String(error);
+
+      setStatus("Kamera açılamadı.");
+
+      alert(
+        "Kamera açılamadı.\n\n" +
+        errorName +
+        "\n" +
+        errorMessage +
+        "\n\nSafari kamera iznini kontrol edin."
+      );
+
+    }
+
+  }
+
+  /************************************************
+   BARKOD OKUNDU
+  ************************************************/
+
+  async function barcodeReadSuccess(decodedText) {
+
+    if (scanLocked) {
+      return;
+    }
+
+    const barcode =
+      String(decodedText || "").trim();
+
+    if (!barcode) {
+      return;
+    }
+
+    scanLocked = true;
+
+    setStatus(
+      "Barkod okundu: " +
+      barcode +
+      "\nStok sistemine dönülüyor..."
+    );
+
+    if (navigator.vibrate) {
+
+      navigator.vibrate(150);
+
+    }
+
+    await stopScannerSilently();
+
+    setTimeout(function () {
+
+      sendBarcodeToStockSystem(barcode);
+
+    }, 400);
+
+  }
+
+  /************************************************
+   ELLE BARKOD GÖNDER
+  ************************************************/
+
+  function sendManualBarcode() {
+
+    const input =
+      document.getElementById("manualBarcode");
+
+    const barcode =
+      input.value.trim();
+
+    if (!barcode) {
+
+      alert("Barkod numarasını girin.");
+
+      input.focus();
+
+      return;
+
+    }
+
+    sendBarcodeToStockSystem(barcode);
+
+  }
+
+  /************************************************
+   BARKODU APPS SCRIPT'E GÖNDER
+  ************************************************/
+
+  function sendBarcodeToStockSystem(barcode) {
+
+    if (!barcode) {
+      return;
+    }
+
+    const separator =
+      APPS_SCRIPT_URL.includes("?")
+        ? "&"
+        : "?";
+
+    const targetUrl =
+      APPS_SCRIPT_URL +
+      separator +
+      "barcode=" +
+      encodeURIComponent(barcode);
+
+    window.location.href = targetUrl;
+
+  }
+
+  /************************************************
+   BARKODSUZ GERİ DÖN
+  ************************************************/
+
+  function returnWithoutBarcode() {
+
+    window.location.href =
+      APPS_SCRIPT_URL;
+
+  }
+
+  /************************************************
+   KAMERAYI KAPAT
+  ************************************************/
+
+  async function stopScanner() {
+
+    await stopScannerSilently();
+
+    setStatus(
+      "Kamera kapatıldı.\nYeniden başlatabilirsiniz."
+    );
+
+  }
+
+  async function stopScannerSilently() {
+
+    if (html5QrCode) {
+
+      try {
+
+        if (scannerRunning) {
+
+          await html5QrCode.stop();
+
+        }
+
+      } catch (error) {
+
+        console.warn(
+          "Kamera durdurma uyarısı:",
+          error
+        );
+
+      }
+
+      try {
+
+        await html5QrCode.clear();
+
+      } catch (error) {
+
+        console.warn(
+          "Kamera temizleme uyarısı:",
+          error
+        );
+
+      }
+
+    }
+
+    await resetScanner();
+
+  }
+
+  async function resetScanner() {
+
+    html5QrCode = null;
+    scannerRunning = false;
+
+    const reader =
+      document.getElementById("reader");
+
+    const startButton =
+      document.getElementById("startButton");
+
+    const stopButton =
+      document.getElementById("stopButton");
+
+    if (reader) {
+      reader.innerHTML = "";
+    }
+
+    if (startButton) {
+
+      startButton.style.display = "block";
+      startButton.disabled = false;
+
+    }
+
+    if (stopButton) {
+
+      stopButton.style.display = "none";
+
+    }
+
+  }
+
+  /************************************************
+   DURUM MESAJI
+  ************************************************/
+
+  function setStatus(message) {
+
+    const status =
+      document.getElementById("status");
+
+    status.textContent = message;
+
+  }
+
+</script>
+
+</body>
+
+</html>
