@@ -1,19 +1,29 @@
 <!doctype html>
 <html lang="tr">
 <head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
-  <meta name="theme-color" content="#111827">
-  <title>HOCA MOBİLYA STOK PRO</title>
-  <link rel="stylesheet" href="styles.css">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
+<meta name="theme-color" content="#0b0f14">
+<title>HOCA MOBİLYA Barkod Kamera</title>
+<link rel="stylesheet" href="style.css">
+<script src="https://unpkg.com/@zxing/browser@0.1.5/umd/zxing-browser.min.js" defer></script>
+<script src="camera.js" defer></script>
 </head>
 <body>
-  <iframe
-    id="appFrame"
-    src="https://script.google.com/macros/s/AKfycbzKW87lp7ZpwzvrJr0W36rj_VCScP2MCZJBOdUnU4NX_i2K0fJeUUsjzZapnsT1kjrc/exec"
-    title="HOCA MOBİLYA STOK PRO"
-  ></iframe>
-
-  <script src="app.js"></script>
+<main class="camera-app">
+  <video id="cameraVideo" playsinline muted autoplay></video>
+  <div class="shade"></div>
+  <div class="scan-box"><i></i></div>
+  <header><strong>HOCA MOBİLYA</strong><button id="closeButton" type="button">Kapat</button></header>
+  <section class="status-panel">
+    <strong id="statusTitle">Kamera hazırlanıyor</strong>
+    <span id="statusText">Lütfen kamera iznine izin verin.</span>
+  </section>
+  <footer>
+    <button id="torchButton" type="button" disabled>Fener</button>
+    <span id="lastBarcode">Barkod bekleniyor</span>
+    <button id="switchButton" type="button">Kamera Değiştir</button>
+  </footer>
+</main>
 </body>
 </html>
