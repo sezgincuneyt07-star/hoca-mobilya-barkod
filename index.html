@@ -6,54 +6,13 @@
   <meta name="theme-color" content="#111827">
   <title>HOCA MOBİLYA STOK PRO</title>
   <link rel="stylesheet" href="styles.css">
-  <script src="https://unpkg.com/@zxing/browser@0.1.5/umd/zxing-browser.min.js"></script>
 </head>
 <body>
   <iframe
     id="appFrame"
     src="https://script.google.com/macros/s/AKfycbzKW87lp7ZpwzvrJr0W36rj_VCScP2MCZJBOdUnU4NX_i2K0fJeUUsjzZapnsT1kjrc/exec"
     title="HOCA MOBİLYA STOK PRO"
-    allow="camera; microphone"
   ></iframe>
-
-  <button id="openCameraButton" class="open-camera-button" type="button" aria-label="Canlı kamerayı aç">📷 Canlı Kamerayı Aç</button>
-
-  <div id="cameraLayer" class="camera-layer hidden" aria-hidden="true">
-    <div class="camera-panel">
-      <div class="camera-topbar">
-        <div>
-          <strong id="cameraTitle">Canlı Seri Kamera</strong>
-          <span id="cameraStatus">Kamera hazırlanıyor…</span>
-        </div>
-        <button id="closeCamera" type="button" aria-label="Kamerayı kapat">×</button>
-      </div>
-
-      <div class="video-wrap">
-        <video id="cameraVideo" playsinline muted autoplay></video>
-        <div class="scan-guide"><span></span></div>
-        <div id="engineBadge" class="engine-badge">Hazırlanıyor</div>
-      </div>
-
-      <div class="controls">
-        <select id="cameraSelect" aria-label="Kamera seç">
-          <option value="">Arka kamera (otomatik)</option>
-        </select>
-        <select id="cooldownSelect" aria-label="Tekrar bekleme süresi">
-          <option value="700">0,7 saniye</option>
-          <option value="1000" selected>1 saniye</option>
-          <option value="1500">1,5 saniye</option>
-        </select>
-        <button id="torchButton" type="button" disabled>Fener</button>
-      </div>
-
-      <div class="last-read">
-        <span>Son okunan</span>
-        <strong id="lastBarcode">Henüz okutulmadı</strong>
-      </div>
-
-      <p id="cameraError" class="camera-error"></p>
-    </div>
-  </div>
 
   <script src="app.js"></script>
 </body>
