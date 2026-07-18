@@ -1,69 +1,212 @@
 (() => {
   "use strict";
-  const $ = id => document.getElementById(id);
-  const APP_ORIGIN_SUFFIX = ".googleusercontent.com";
-  const state = { reader:null, controls:null, stream:null, track:null, busy:false, lastBarcode:"", lastAt:0, count:0, pending:new Map(), recent:[] };
 
-  function setStatus(text,type=""){ $("cameraStatus").textContent=text; $("cameraStatus").className="status "+type; }
-  function beep(ok=true){ try{const C=window.AudioContext||window.webkitAudioContext;if(!C)return;const c=new C(),o=c.createOscillator(),g=c.createGain();o.frequency.value=ok?930:220;g.gain.value=.06;o.connect(g);g.connect(c.destination);o.start();o.stop(c.currentTime+(ok?.08:.2));o.onended=()=>c.close()}catch(e){} }
-  function hostWindow(){
-    if(window.parent && window.parent !== window) return window.parent;
-    if(window.opener && !window.opener.closed) return window.opener;
-    return null;
+  const $ = id => document.getElementById(id);
+  const appFrame = $("appFrame");
+  const layer = $("cameraLayer");
+  const video = $("cameraVideo");
+
+  const state = {
+    mode: "quick",
+    running: false,
+    stream: null,
+    track: null,
+    detector: null,
+    reader: null,
+    controls: null,
+    engine: "",
+    raf: 0,
+    busy: false,
+    lastBarcode: "",
+    lastAt: 0,
+    torch: false
+  };
+
+  function sendToApp(message) {
+    appFrame.contentWindow.postMessage(message, "*");
   }
-  function send(data){ const host=hostWindow(); if(host) host.postMessage({source:"HOCA_MOBILYA_CAMERA",...data},"*"); }
-  function ready(){ send({type:"CAMERA_READY"}); }
-  function validAppMessage(event){ const d=event.data||{}; return d.source==="HOCA_MOBILYA_APP"; }
-  function renderRecent(){ const el=$("recentList"); if(!state.recent.length){el.innerHTML="<p>Henüz işlem yok.</p>";return;} el.innerHTML="";state.recent.slice(0,20).forEach(x=>{const r=document.createElement("div");r.className="recent-item";r.innerHTML=`<div><strong>${escapeHtml(x.name)}</strong><span>${escapeHtml(x.barcode)} • ${escapeHtml(x.time)}</span></div><b>Stok: ${x.stock}</b>`;el.appendChild(r)}); }
-  function escapeHtml(s){return String(s||"").replace(/[&<>\"]/g,m=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[m]));}
-  function submitBarcode(raw){ const barcode=String(raw||"").trim(); if(!barcode||state.busy)return; const now=Date.now(),cool=Number($("cooldownSelect").value||1400); if(barcode===state.lastBarcode&&now-state.lastAt<cool)return; state.lastBarcode=barcode;state.lastAt=now;state.busy=true;$("lastBarcode").textContent=barcode;$("lastResult").textContent="Uygulamaya gönderiliyor...";setStatus("Stok +1 işlemi yapılıyor...");const scanId=Date.now()+"-"+Math.random().toString(36).slice(2);state.pending.set(scanId,barcode);send({type:"BARCODE_SCANNED",barcode,scanId});setTimeout(()=>{if(state.pending.has(scanId)){state.pending.delete(scanId);state.busy=false;$("lastResult").textContent="Uygulamadan cevap alınamadı";setStatus("Apps Script sekmesini açık tutun.","error");beep(false)}},15000); }
-  window.addEventListener("message",event=>{
-    if(!validAppMessage(event))return;
-    const d=event.data;
-    if(d.type==="APP_READY"){
-      $("connectionBadge").textContent=(d.personnel||"Uygulama")+" bağlı";
-      $("connectionBadge").className="badge connected";
-      return;
+
+  function setStatus(text) { $("cameraStatus").textContent = text; }
+  function setError(text = "") { $("cameraError").textContent = text; }
+  function setEngine(text) { $("engineBadge").textContent = text; }
+
+  function beep(ok = true) {
+    try {
+      const AudioCtx = window.AudioContext || window.webkitAudioContext;
+      const ctx = new AudioCtx();
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.frequency.value = ok ? 980 : 220;
+      gain.gain.setValueAtTime(.14, ctx.currentTime);
+      gain.gain.exponentialRampToValueAtTime(.001, ctx.currentTime + .12);
+      osc.connect(gain); gain.connect(ctx.destination);
+      osc.start(); osc.stop(ctx.currentTime + .13);
+    } catch (_) {}
+  }
+
+  function acceptedBarcode(raw) {
+    const barcode = String(raw || "").trim();
+    if (!barcode || state.busy) return;
+    const now = Date.now();
+    const cooldown = Number($("cooldownSelect").value || 1000);
+    if (barcode === state.lastBarcode && now - state.lastAt < cooldown) return;
+
+    state.busy = true;
+    state.lastBarcode = barcode;
+    state.lastAt = now;
+    $("lastBarcode").textContent = barcode;
+    setStatus("Okundu. Sonraki barkodu bekliyor…");
+    beep(true);
+    if (navigator.vibrate) navigator.vibrate(70);
+    sendToApp({ type: "HOCA_CAMERA_BARCODE", barcode, mode: state.mode });
+    setTimeout(() => { state.busy = false; }, 450);
+  }
+
+  async function listDevices() {
+    try {
+      const devices = await navigator.mediaDevices.enumerateDevices();
+      const cameras = devices.filter(d => d.kind === "videoinput");
+      const select = $("cameraSelect");
+      const selected = select.value;
+      select.innerHTML = '<option value="">Arka kamera (otomatik)</option>';
+      cameras.forEach((camera, i) => {
+        const option = document.createElement("option");
+        option.value = camera.deviceId;
+        option.textContent = camera.label || `Kamera ${i + 1}`;
+        select.appendChild(option);
+      });
+      select.value = selected;
+    } catch (_) {}
+  }
+
+  async function startNative() {
+    let formats = ["ean_13","ean_8","code_128","code_39","upc_a","upc_e","itf"];
+    if (BarcodeDetector.getSupportedFormats) {
+      const supported = await BarcodeDetector.getSupportedFormats();
+      formats = formats.filter(f => supported.includes(f));
     }
-    if(d.type==="SESSION_CLOSED"){
-      $("connectionBadge").textContent="Oturum kapandı";
-      $("connectionBadge").className="badge";
-      setStatus("Apps Script oturumu kapatıldı.","error");
-      state.busy=true;
-      return;
+    state.detector = formats.length ? new BarcodeDetector({ formats }) : new BarcodeDetector();
+    const deviceId = $("cameraSelect").value;
+    state.stream = await navigator.mediaDevices.getUserMedia({
+      video: deviceId ? { deviceId: { exact: deviceId } } : {
+        facingMode: { ideal: "environment" }, width: { ideal: 1280 }, height: { ideal: 720 }
+      }, audio: false
+    });
+    video.srcObject = state.stream;
+    await video.play();
+    state.track = state.stream.getVideoTracks()[0] || null;
+    state.engine = "native";
+    setEngine("Yerleşik okuyucu");
+    scanNative();
+  }
+
+  async function scanNative() {
+    if (!state.running || state.engine !== "native") return;
+    try {
+      if (video.readyState >= 2 && !state.busy) {
+        const hits = await state.detector.detect(video);
+        if (hits && hits[0]) acceptedBarcode(hits[0].rawValue);
+      }
+    } catch (_) {}
+    state.raf = requestAnimationFrame(scanNative);
+  }
+
+  async function startZxing() {
+    if (!window.ZXingBrowser || !window.ZXingBrowser.BrowserMultiFormatReader) {
+      throw new Error("Barkod okuyucu kütüphanesi yüklenemedi.");
     }
-    if(d.type==="PRODUCT_REQUIRED"){
-      $("lastResult").textContent="Ürün kayıtlı değil";
-      setStatus("Ürün bilgisi ana ekranda bekleniyor...","error");
-      beep(false);
-      return;
+    state.reader = new window.ZXingBrowser.BrowserMultiFormatReader();
+    const deviceId = $("cameraSelect").value || undefined;
+    state.controls = await state.reader.decodeFromVideoDevice(deviceId, video, result => {
+      if (result) acceptedBarcode(result.getText());
+    });
+    state.stream = video.srcObject;
+    state.track = state.stream && state.stream.getVideoTracks ? state.stream.getVideoTracks()[0] : null;
+    state.engine = "zxing";
+    setEngine("ZXing okuyucu");
+  }
+
+  function updateTorch() {
+    let supported = false;
+    try { supported = Boolean(state.track?.getCapabilities?.().torch); } catch (_) {}
+    $("torchButton").disabled = !supported;
+    $("torchButton").textContent = state.torch ? "Feneri Kapat" : "Feneri Aç";
+  }
+
+  async function startCamera(mode = "quick") {
+    await stopCamera(false);
+    state.mode = mode;
+    state.running = true;
+    state.busy = false;
+    layer.classList.remove("hidden");
+    layer.setAttribute("aria-hidden", "false");
+    $("cameraTitle").textContent = mode === "stock" ? "Stok İşlemi – Canlı Kamera" : "Seri Stok +1 – Canlı Kamera";
+    setStatus("Kamera izni bekleniyor…");
+    setError("");
+    setEngine("Hazırlanıyor");
+
+    try {
+      if (!window.isSecureContext) throw new Error("Kamera HTTPS bağlantısı gerektirir.");
+      if (!navigator.mediaDevices?.getUserMedia) throw new Error("Tarayıcı kamera erişimini desteklemiyor.");
+      if ("BarcodeDetector" in window) {
+        try { await startNative(); }
+        catch (_) { await stopTracksOnly(); state.running = true; await startZxing(); }
+      } else {
+        await startZxing();
+      }
+      await listDevices();
+      updateTorch();
+      setStatus("Barkodu çerçeveye gösterin.");
+    } catch (error) {
+      const name = error?.name || "";
+      let message = error?.message || "Kamera başlatılamadı.";
+      if (name === "NotAllowedError") message = "Kamera izni reddedildi. Adres çubuğundaki kilit simgesinden kameraya izin verin.";
+      else if (name === "NotFoundError") message = "Kamera bulunamadı.";
+      else if (name === "NotReadableError") message = "Kamera başka bir uygulama tarafından kullanılıyor.";
+      setError(message);
+      setStatus("Kamera başlatılamadı.");
+      state.running = false;
     }
-    if(d.type==="SCAN_RESUME"){
-      state.pending.delete(String(d.scanId||""));
-      state.busy=false;
-      $("lastResult").textContent="Ürün eklenmeden geçildi";
-      setStatus("Hazır. Sıradaki barkod bekleniyor...","success");
-      return;
+  }
+
+  async function stopTracksOnly() {
+    if (state.raf) cancelAnimationFrame(state.raf);
+    state.raf = 0;
+    try { state.controls?.stop?.(); } catch (_) {}
+    try { state.reader?.reset?.(); } catch (_) {}
+    if (state.stream) state.stream.getTracks().forEach(t => t.stop());
+    video.srcObject = null;
+    state.stream = state.track = state.reader = state.controls = state.detector = null;
+    state.engine = "";
+  }
+
+  async function stopCamera(hide = true) {
+    state.running = false;
+    state.torch = false;
+    await stopTracksOnly();
+    if (hide) {
+      layer.classList.add("hidden");
+      layer.setAttribute("aria-hidden", "true");
+      sendToApp({ type: "HOCA_CAMERA_CLOSED" });
     }
-    if(d.type!=="STOCK_RESULT")return;
-    state.pending.delete(String(d.scanId||""));
-    state.busy=false;
-    if(d.success){
-      state.count++;
-      $("successCount").textContent=state.count;
-      $("lastResult").textContent=`${d.productName||"Ürün"} • Yeni stok: ${d.newStock}`;
-      setStatus("Başarılı. Sıradaki barkod bekleniyor...","success");
-      state.recent.unshift({name:d.productName||"Ürün",barcode:d.barcode,stock:d.newStock,time:new Date().toLocaleTimeString("tr-TR")});
-      renderRecent();beep(true);if(navigator.vibrate)navigator.vibrate([60,35,60]);
-    }else{
-      $("lastResult").textContent=d.message||"İşlem başarısız";
-      setStatus((d.message||"İşlem başarısız")+" • Yeni barkod bekleniyor...","error");
-      beep(false);
-    }
+  }
+
+  window.addEventListener("message", event => {
+    const data = event.data || {};
+    if (data.type === "HOCA_APP_READY") sendToApp({ type: "HOCA_CAMERA_READY" });
+    if (data.type === "HOCA_CAMERA_OPEN") startCamera(data.mode);
   });
-  async function stop(){try{state.controls&&state.controls.stop()}catch(e){}try{state.reader&&state.reader.reset()}catch(e){}if(state.stream)state.stream.getTracks().forEach(t=>t.stop());state.controls=null;state.reader=null;state.stream=null;state.track=null;}
-  async function loadDevices(){if(!navigator.mediaDevices)return;const ds=await navigator.mediaDevices.enumerateDevices();const cams=ds.filter(d=>d.kind==="videoinput");const sel=$("cameraSelect"),old=sel.value;sel.innerHTML='<option value="">Arka kamera (otomatik)</option>';cams.forEach((c,i)=>{const o=document.createElement("option");o.value=c.deviceId;o.textContent=c.label||`Kamera ${i+1}`;sel.appendChild(o)});if(cams.some(c=>c.deviceId===old))sel.value=old;}
-  async function start(){await stop();setStatus("Kamera izni bekleniyor...");try{if(!window.ZXingBrowser)throw new Error("Barkod kütüphanesi yüklenemedi.");state.reader=new ZXingBrowser.BrowserMultiFormatReader();const device=$("cameraSelect").value||undefined;state.controls=await state.reader.decodeFromVideoDevice(device,$("cameraVideo"),(result)=>{if(result)submitBarcode(result.getText())});const video=$("cameraVideo");state.stream=video.srcObject;state.track=state.stream&&state.stream.getVideoTracks()[0];const caps=state.track&&state.track.getCapabilities?state.track.getCapabilities():{};$("torchButton").disabled=!caps.torch;await loadDevices();setStatus("Hazır. Barkodu çerçevenin ortasına gösterin.","success");ready();}catch(e){setStatus(e.message||"Kamera açılamadı.","error");$("lastResult").textContent="Kamera hatası";}}
-  if(new URLSearchParams(location.search).get("embedded") === "1") document.documentElement.classList.add("embedded");
-  $("restartButton").onclick=start;$("cameraSelect").onchange=start;$("manualButton").onclick=()=>{submitBarcode($("manualBarcode").value);$("manualBarcode").value=""};$("manualBarcode").onkeydown=e=>{if(e.key==="Enter"){e.preventDefault();$("manualButton").click()}};$("torchButton").onclick=async()=>{if(!state.track)return;const on=$("torchButton").dataset.on!=="1";try{await state.track.applyConstraints({advanced:[{torch:on}]});$("torchButton").dataset.on=on?"1":"0";$("torchButton").textContent=on?"Feneri Kapat":"Fener"}catch(e){}};window.addEventListener("beforeunload",()=>{send({type:"CAMERA_CLOSED"});stop()});start();setInterval(ready,2500);
+
+  $("closeCamera").addEventListener("click", () => stopCamera(true));
+  $("cameraSelect").addEventListener("change", () => startCamera(state.mode));
+  $("torchButton").addEventListener("click", async () => {
+    if (!state.track) return;
+    try {
+      state.torch = !state.torch;
+      await state.track.applyConstraints({ advanced: [{ torch: state.torch }] });
+      updateTorch();
+    } catch (_) { state.torch = false; updateTorch(); }
+  });
+
+  appFrame.addEventListener("load", () => sendToApp({ type: "HOCA_CAMERA_READY" }));
 })();
