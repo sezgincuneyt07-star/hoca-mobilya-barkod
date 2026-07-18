@@ -1,60 +1,150 @@
 (() => {
   "use strict";
-  const $ = id => document.getElementById(id);
-  const allowedParent = "*";
-  const params = new URLSearchParams(location.search);
-  const mode = params.get("mode") === "stock" ? "stock" : "quick";
-  let reader = null, controls = null, stream = null, track = null, torch = false;
-  let devices = [], deviceIndex = 0, busy = false, lastCode = "", lastAt = 0;
 
-  function post(type, extra={}) {
-    parent.postMessage({ source:"HOCA_MOBILYA_CAMERA", type, mode, ...extra }, allowedParent);
+  const $ = id => document.getElementById(id);
+  const params = new URLSearchParams(window.location.search);
+  const mode = params.get("mode") === "stock" ? "stock" : "quick";
+  const returnUrl = params.get("returnUrl") || "https://script.google.com/macros/s/AKfycbzKW87lp7ZpwzvrJr0W36rj_VCScP2MCZJBOdUnU4NX_i2K0fJeUUsjzZapnsT1kjrc/exec";
+
+  let reader = null;
+  let controls = null;
+  let stream = null;
+  let track = null;
+  let torch = false;
+  let devices = [];
+  let deviceIndex = 0;
+  let busy = false;
+  let lastCode = "";
+  let lastAt = 0;
+
+  function status(title, text) {
+    $("statusTitle").textContent = title;
+    $("statusText").textContent = text;
   }
-  function status(title,text){ $("statusTitle").textContent=title; $("statusText").textContent=text; }
-  function beep(ok=true){
-    try { const C=window.AudioContext||window.webkitAudioContext, c=new C(), o=c.createOscillator(), g=c.createGain(); o.frequency.value=ok?980:260; g.gain.value=.05; o.connect(g); g.connect(c.destination); o.start(); o.stop(c.currentTime+.09); } catch(e){}
+
+  function beep(ok = true) {
+    try {
+      const AudioContextClass = window.AudioContext || window.webkitAudioContext;
+      const context = new AudioContextClass();
+      const oscillator = context.createOscillator();
+      const gain = context.createGain();
+      oscillator.frequency.value = ok ? 980 : 260;
+      gain.gain.value = 0.05;
+      oscillator.connect(gain);
+      gain.connect(context.destination);
+      oscillator.start();
+      oscillator.stop(context.currentTime + 0.09);
+    } catch (error) {}
   }
-  async function stop(){
-    if(controls){ try{controls.stop()}catch(e){} }
-    if(reader){ try{reader.reset()}catch(e){} }
-    if(stream){ stream.getTracks().forEach(t=>t.stop()); }
-    controls=reader=stream=track=null; torch=false; $("torchButton").disabled=true;
+
+  function buildReturnUrl(extra = {}) {
+    const url = new URL(returnUrl);
+    Object.entries(extra).forEach(([key, value]) => url.searchParams.set(key, value));
+    url.searchParams.set("cameraMode", mode);
+    url.searchParams.set("cameraTime", String(Date.now()));
+    return url.toString();
   }
-  async function start(deviceId){
-    await stop(); busy=false; status("Kamera izni bekleniyor","Arka kamera açılıyor...");
-    try{
-      if(!window.ZXingBrowser || !ZXingBrowser.BrowserMultiFormatReader) throw new Error("Barkod kütüphanesi yüklenemedi.");
-      reader=new ZXingBrowser.BrowserMultiFormatReader();
-      controls=await reader.decodeFromVideoDevice(deviceId||undefined,$("cameraVideo"),(result,error)=>{
-        if(result) onCode(result.getText());
-      });
-      stream=$("cameraVideo").srcObject;
-      track=stream && stream.getVideoTracks ? stream.getVideoTracks()[0] : null;
-      const caps=track && track.getCapabilities ? track.getCapabilities() : {};
-      $("torchButton").disabled=!caps.torch;
-      devices=await ZXingBrowser.BrowserCodeReader.listVideoInputDevices();
-      if(deviceId){ const i=devices.findIndex(d=>d.deviceId===deviceId); if(i>=0) deviceIndex=i; }
-      status("Kamera hazır", mode==="stock"?"Barkodu çerçeveye gösterin; ürün forma aktarılacak.":"Barkodu gösterin; stok otomatik +1 artacak.");
-      post("CAMERA_READY");
-    }catch(e){
-      let m=e.message||"Kamera başlatılamadı.";
-      if(e.name==="NotAllowedError") m="Kamera izni verilmedi. Tarayıcı ayarlarından kamera iznini açın.";
-      status("Kamera başlatılamadı",m); post("CAMERA_ERROR",{message:m});
+
+  async function stop() {
+    if (controls) {
+      try { controls.stop(); } catch (error) {}
+    }
+    if (reader) {
+      try { reader.reset(); } catch (error) {}
+    }
+    if (stream) stream.getTracks().forEach(item => item.stop());
+    controls = null;
+    reader = null;
+    stream = null;
+    track = null;
+    torch = false;
+    $("torchButton").disabled = true;
+  }
+
+  async function start(deviceId) {
+    await stop();
+    busy = false;
+    status("Kamera izni bekleniyor", "Arka kamera açılıyor...");
+
+    try {
+      if (!window.ZXingBrowser || !ZXingBrowser.BrowserMultiFormatReader) {
+        throw new Error("Barkod kütüphanesi yüklenemedi.");
+      }
+
+      reader = new ZXingBrowser.BrowserMultiFormatReader();
+      controls = await reader.decodeFromVideoDevice(
+        deviceId || undefined,
+        $("cameraVideo"),
+        result => {
+          if (result) onCode(result.getText());
+        }
+      );
+
+      stream = $("cameraVideo").srcObject;
+      track = stream && stream.getVideoTracks ? stream.getVideoTracks()[0] : null;
+      const capabilities = track && track.getCapabilities ? track.getCapabilities() : {};
+      $("torchButton").disabled = !capabilities.torch;
+
+      devices = await ZXingBrowser.BrowserCodeReader.listVideoInputDevices();
+      if (deviceId) {
+        const index = devices.findIndex(device => device.deviceId === deviceId);
+        if (index >= 0) deviceIndex = index;
+      }
+
+      status(
+        "Kamera hazır",
+        mode === "stock"
+          ? "Barkodu gösterin; ürün stok formuna aktarılacak."
+          : "Barkodu gösterin; stok +1 yapılıp kamera yeniden açılacak."
+      );
+    } catch (error) {
+      let message = error.message || "Kamera başlatılamadı.";
+      if (error.name === "NotAllowedError") {
+        message = "Kamera izni verilmedi. Tarayıcı ayarlarından kamera iznini açın.";
+      }
+      status("Kamera başlatılamadı", message);
+      beep(false);
     }
   }
-  function onCode(value){
-    const code=String(value||"").trim(), now=Date.now();
-    if(!code||busy) return;
-    if(code===lastCode && now-lastAt<1400) return;
-    lastCode=code; lastAt=now; busy=true; $("lastBarcode").textContent=code;
-    status("Barkod okundu",code+" işleniyor..."); beep(true); if(navigator.vibrate) navigator.vibrate(80);
-    post("BARCODE_SCANNED",{barcode:code,scanId:String(now)});
-    setTimeout(()=>{ busy=false; status("Kamera hazır","Sıradaki barkodu gösterebilirsiniz."); }, mode==="stock"?1800:1100);
+
+  async function onCode(value) {
+    const code = String(value || "").trim();
+    const now = Date.now();
+    if (!code || busy) return;
+    if (code === lastCode && now - lastAt < 1600) return;
+
+    lastCode = code;
+    lastAt = now;
+    busy = true;
+    $("lastBarcode").textContent = code;
+    status("Barkod okundu", "Stok uygulamasına dönülüyor...");
+    beep(true);
+    if (navigator.vibrate) navigator.vibrate(80);
+
+    await stop();
+    window.location.replace(buildReturnUrl({ cameraBarcode: code }));
   }
-  $("closeButton").addEventListener("click",async()=>{ await stop(); post("CAMERA_CLOSED"); });
-  $("switchButton").addEventListener("click",async()=>{ if(!devices.length) return; deviceIndex=(deviceIndex+1)%devices.length; await start(devices[deviceIndex].deviceId); });
-  $("torchButton").addEventListener("click",async()=>{ if(!track)return; try{torch=!torch; await track.applyConstraints({advanced:[{torch}]}); $("torchButton").textContent=torch?"Feneri Kapat":"Fener";}catch(e){} });
-  window.addEventListener("message",e=>{ const d=e.data||{}; if(d.source!=="HOCA_MOBILYA_APP")return; if(d.type==="CLOSE_CAMERA") stop(); if(d.type==="STOCK_RESULT"){ status(d.success?"İşlem başarılı":"İşlem başarısız",d.message||""); beep(!!d.success); } });
-  window.addEventListener("beforeunload",stop);
-  window.addEventListener("load",()=>start());
+
+  $("closeButton").addEventListener("click", async () => {
+    await stop();
+    window.location.replace(buildReturnUrl({ cameraCancelled: "1" }));
+  });
+
+  $("switchButton").addEventListener("click", async () => {
+    if (!devices.length) return;
+    deviceIndex = (deviceIndex + 1) % devices.length;
+    await start(devices[deviceIndex].deviceId);
+  });
+
+  $("torchButton").addEventListener("click", async () => {
+    if (!track) return;
+    try {
+      torch = !torch;
+      await track.applyConstraints({ advanced: [{ torch }] });
+      $("torchButton").textContent = torch ? "Feneri Kapat" : "Fener";
+    } catch (error) {}
+  });
+
+  window.addEventListener("beforeunload", stop);
+  window.addEventListener("load", () => start());
 })();
